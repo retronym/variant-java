@@ -1,0 +1,4 @@
+<plugin>
+  <name>variant-java-plugin</name>
+  <classname>com.github.retronym.variantjava.Plugin</classname>
+</plugin>
