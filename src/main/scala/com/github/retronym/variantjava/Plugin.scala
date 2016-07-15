@@ -1,34 +1,35 @@
 package com.github.retronym.variantjava
 
-import scala.tools.nsc.{ Global, Phase }
+import scala.tools.nsc.{Global, Phase, SubComponent}
 import scala.reflect.internal.Variance
 import scala.reflect.internal.Variance._
+import scala.tools.nsc.plugins.PluginComponent
 
 class Plugin(val global: Global) extends scala.tools.nsc.plugins.Plugin {
+  self =>
   import global._
 
   val name = "variant-java-plugin"
   val description = "Makes java.util.function._ appear to have declaration site variance"
-  val components = Nil
+  val components: List[PluginComponent] = dummyComponent :: Nil
 
-  override def init(options: List[String], error: String => Unit): Boolean = {
-    def setVariance(className: String, variances: Variance*) {
-      val cls = rootMirror.getClassIfDefined(className)
-      if (cls != NoSymbol) {
-        if (cls.typeParams.length == variances.length) {
-          (cls.typeParams, variances).zipped.foreach {
-            (tparam, variance) =>
-              val flag = variance match {
-                case Variance.Covariant => Flag.COVARIANT
-                case Variance.Contravariant => Flag.CONTRAVARIANT
-                case _ => 0L
-              }
-              // println(s"making ${tparam.fullLocationString} $variance")
-              tparam.setFlag(flag)
-          }
-        }
-      }
-    }    
+  private object dummyComponent extends PluginComponent {
+    override def newPhase(p: Phase): Phase = {
+      modifySymbols
+      p
+    }
+    override val global: self.global.type = self.global
+    override val runsAfter: List[String] = "parser" :: Nil
+    override val phaseName: String = "dummy"
+  }
+
+  private lazy val modifySymbols: Unit = {
+    assert(definitions.isDefinitionsInitialized)
+    setVariances()
+    ()
+  }
+
+  private def setVariances(): Unit = {
     setVariance("java.util.function.BiFunction", Contravariant, Contravariant, Covariant)
     setVariance("java.util.function.Function", Contravariant, Covariant)
     setVariance("java.util.function.ObjLongConsumer", Contravariant)
@@ -48,7 +49,24 @@ class Plugin(val global: Global) extends scala.tools.nsc.plugins.Plugin {
     setVariance("java.util.function.IntFunction", Covariant)
     setVariance("java.util.function.ToDoubleFunction", Contravariant)
     setVariance("java.util.function.ToDoubleBiFunction", Contravariant, Contravariant)
-    true
+  }
+
+  private def setVariance(className: String, variances: Variance*): Unit = {
+    val cls = rootMirror.getClassIfDefined(className)
+    if (cls != NoSymbol) {
+      if (cls.typeParams.length == variances.length) {
+        (cls.typeParams, variances).zipped.foreach {
+          (tparam, variance) =>
+            val flag = variance match {
+              case Variance.Covariant => Flag.COVARIANT
+              case Variance.Contravariant => Flag.CONTRAVARIANT
+              case _ => 0L
+            }
+            tparam.setFlag(flag)
+        }
+      } else
+        reporter.warning(NoPosition, s"$name failed to set variance for $cls: wrong number of type parameters")
+    }
   }
 }
 /*
